@@ -141,8 +141,7 @@ class FileCertificateStore(CertificateStoreBase):
                 for existing in db["certificates"]:
                     if existing["serial"] == cert.serial_number:
                         raise ValueError(
-                            f"Certificate with serial {
-                                cert.serial_number} already exists")
+                            f"Certificate with serial {cert.serial_number} already exists")
 
                 # Update database
                 cert_info = cert_to_json(cert.certificate)

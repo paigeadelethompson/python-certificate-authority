@@ -235,9 +235,8 @@ class CertificateAuthority:
                 if curve.lower() not in SAFE_CURVES:
                     logger.error("Unsupported or unsafe curve: %s", curve)
                     raise ValueError(
-                        f"Unsupported or unsafe curve: {curve}. Please use one of: {
-                            ', '.join(
-                                SAFE_CURVES.keys())}")
+                        f"Unsupported or unsafe curve: {curve}. Please use one of: {', '.join(SAFE_CURVES.keys())}"
+                    )
                 if SAFE_CURVES[curve.lower()] is None:
                     logger.error(
                         "Curve %s is not available in the cryptography library", curve)
@@ -410,17 +409,14 @@ class CertificateAuthority:
             if request.curve.lower() not in SAFE_CURVES:
                 logger.error("Unsupported or unsafe curve: %s", request.curve)
                 raise ValueError(
-                    f"Unsupported or unsafe curve: {
-                        request.curve}. Please use one of: {
-                        ', '.join(
-                            SAFE_CURVES.keys())}")
+                    f"Unsupported or unsafe curve: {request.curve}. Please use one of: {', '.join(SAFE_CURVES.keys())}"
+                )
             if SAFE_CURVES[request.curve.lower()] is None:
                 logger.error(
                     "Curve %s is not available in the cryptography library",
                     request.curve)
                 raise ValueError(
-                    f"Curve {
-                        request.curve} is not available in the cryptography library")
+                    f"Curve {request.curve} is not available in the cryptography library")
 
         # Validate path length constraint for sub-CA certificates
         if request.is_ca or cert_type == "sub-ca":
