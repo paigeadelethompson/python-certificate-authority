@@ -46,6 +46,8 @@ from typing import List, Optional
 
 import click
 from cryptography import x509
+from cryptography.x509 import ReasonFlags
+from cryptography.hazmat.primitives import serialization
 
 from .ca import CertificateAuthority
 from .constants import SAFE_CURVES
@@ -60,18 +62,20 @@ def async_command(f):
     return wrapper
 
 
-@click.group(name="ca")
+@click.group()
 @click.option(
     "--ca-dir",
     default="ca",
     help="Directory for CA files",
     show_default=True,
+    envvar="CA_DIR",
 )
 @click.option(
     "--verbose",
     "-v",
     is_flag=True,
     help="Enable verbose output",
+    envvar="CA_VERBOSE",
 )
 @click.pass_context
 def cli(ctx: click.Context, ca_dir: str, verbose: bool) -> None:
@@ -317,9 +321,7 @@ async def revoke(
     ca = CertificateAuthority(ctx.obj["ca_dir"])
     await ca.revoke_certificate(
         serial,
-        reason=getattr(
-            x509.ReasonFlags,
-            reason) if reason else None)
+        reason=getattr(ReasonFlags, reason) if reason else None)
     click.echo(f"Certificate {serial} revoked successfully")
 
 
@@ -349,7 +351,7 @@ async def generate(ctx: click.Context) -> None:
     ca = CertificateAuthority(ctx.obj["ca_dir"])
     crl = await ca.generate_crl()
     with open("crl.pem", "wb") as f:
-        f.write(crl.public_bytes(encoding=x509.Encoding.PEM))
+        f.write(crl.public_bytes(encoding=serialization.Encoding.PEM))
     click.echo("CRL generated successfully and saved to crl.pem")
 
 

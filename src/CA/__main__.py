@@ -12,9 +12,6 @@ Example:
 
 from .cli import cli
 
-def main():
-    """Main entry point for the CLI application"""
-    cli(prog_name="ca")
-
 if __name__ == "__main__":
-    main()
+    # pylint: disable=no-value-for-parameter
+    cli()
