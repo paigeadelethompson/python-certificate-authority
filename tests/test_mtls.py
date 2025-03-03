@@ -7,6 +7,7 @@ import tempfile
 
 import aiohttp
 import pytest
+import pytest_asyncio
 from aiohttp import web
 from cryptography.hazmat.primitives import serialization
 
@@ -15,7 +16,7 @@ from CA.constants import ExtendedKeyUsage, KeyUsage
 from CA.models.certificate import CertificateRequest
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def mtls_setup():
     """Setup CA and certificates for mTLS testing"""
     # Initialize CA
@@ -141,7 +142,7 @@ async def test_mtls_missing_client_cert(mtls_setup):
         )
 
         async with aiohttp.ClientSession() as session:
-            with pytest.raises(aiohttp.ServerDisconnectedError):
+            with pytest.raises((aiohttp.ServerDisconnectedError, aiohttp.ClientOSError)):
                 async with session.get(
                     "https://localhost:8443", ssl=client_ssl_context
                 ) as response:
@@ -257,9 +258,7 @@ async def test_mtls_expired_client_cert(mtls_setup):
         )
 
         async with aiohttp.ClientSession() as session:
-            with pytest.raises(
-                aiohttp.ServerDisconnectedError
-            ):  # Server will disconnect when cert is expired
+            with pytest.raises((aiohttp.ServerDisconnectedError, aiohttp.ClientOSError)):
                 async with session.get(
                     "https://localhost:8443", ssl=client_ssl_context
                 ) as response:

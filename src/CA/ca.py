@@ -1,5 +1,30 @@
 """
-Certificate Authority implementation
+Certificate Authority (CA) Implementation
+
+This module provides a comprehensive implementation of a Certificate Authority (CA) for managing
+X.509 certificates. It supports various key types (RSA, EC, Ed25519, Ed448), certificate types
+(client, server, CA), and certificate operations (issuance, revocation, renewal).
+
+Key Features:
+- Certificate issuance with customizable attributes and extensions
+- Certificate revocation and CRL generation
+- Certificate renewal
+- Support for multiple key types (RSA, EC, Ed25519, Ed448)
+- PKCS#12 and JKS export capabilities
+- Flexible certificate storage backend
+
+Example:
+    >>> ca = CertificateAuthority("ca_files")
+    >>> await ca.initialize(
+    ...     common_name="My Root CA",
+    ...     country="US",
+    ...     organization="My Company"
+    ... )
+    >>> request = CertificateRequest(
+    ...     common_name="server.example.com",
+    ...     san_dns_names=["server.example.com"]
+    ... )
+    >>> cert = await ca.issue_certificate(request, cert_type="server")
 """
 
 import datetime
@@ -26,6 +51,33 @@ logger = logging.getLogger(__name__)
 
 
 class CertificateAuthority:
+    """
+    A Certificate Authority (CA) for managing X.509 certificates.
+
+    This class provides functionality for:
+    - Creating and managing a root CA
+    - Issuing certificates (client, server, sub-CA)
+    - Revoking certificates and generating CRLs
+    - Renewing certificates
+    - Exporting certificates in PKCS#12 and JKS formats
+
+    The CA supports various key types (RSA, EC, Ed25519, Ed448) and allows customization
+    of certificate attributes, extensions, and validity periods.
+
+    Args:
+        base_dir: Base directory for storing CA files
+        store_class: Class to use for certificate storage (defaults to FileCertificateStore)
+        ca_key: Optional PEM-encoded CA private key for initialization
+        ca_cert: Optional PEM-encoded CA certificate for initialization
+
+    Attributes:
+        base_dir: Base directory for CA files
+        store: Certificate store instance
+        initialized: Whether the CA has been initialized
+        ca_key: CA private key
+        ca_cert: CA certificate
+    """
+
     def __init__(
         self,
         base_dir: str,
@@ -61,7 +113,19 @@ class CertificateAuthority:
             self.initialized)
 
     async def _get_next_serial(self) -> int:
-        """Get the next serial number and increment it"""
+        """
+        Get the next available serial number for certificate issuance.
+
+        This method manages the serial number counter for the CA, ensuring each
+        certificate gets a unique serial number. The serial number is stored in
+        a file and incremented after each use.
+
+        Returns:
+            int: The next available serial number
+
+        Note:
+            If the serial file doesn't exist or is corrupted, it starts from 1.
+        """
         logger.debug("Getting next serial number")
         try:
             if os.path.exists(self.serial_file):
@@ -97,7 +161,28 @@ class CertificateAuthority:
         key_size: int = 2048,
         curve: Optional[str] = None,
     ) -> None:
-        """Initialize the CA with a new key pair and self-signed certificate."""
+        """
+        Initialize the CA with a new key pair and self-signed certificate.
+
+        This method creates a new CA key pair and self-signed certificate if none exists,
+        or saves existing ones if provided during construction. The CA certificate will
+        be configured with appropriate extensions for a root CA.
+
+        Args:
+            common_name: CA certificate common name (required if creating new CA)
+            country: Two-letter country code
+            state: State or province name
+            locality: Locality name
+            org: Organization name
+            org_unit: Organizational unit name
+            key_type: Type of key to generate ('rsa', 'ec', 'ed25519', 'ed448')
+            key_size: Key size in bits (for RSA keys)
+            curve: Curve name (for EC keys)
+
+        Raises:
+            ValueError: If required parameters are missing or invalid
+            RuntimeError: If CA is already initialized
+        """
         logger.debug(
             "Initializing CA with key_type=%s, key_size=%d, curve=%s",
             key_type,
@@ -270,7 +355,24 @@ class CertificateAuthority:
     async def issue_certificate(
         self, request: CertificateRequest, cert_type: str = "client"
     ) -> Certificate:
-        """Issue a new certificate based on the request."""
+        """
+        Issue a new certificate based on the provided request.
+
+        This method creates a new certificate signed by the CA using the parameters
+        specified in the certificate request. The certificate type determines the
+        default key usage and extended key usage extensions.
+
+        Args:
+            request: Certificate request containing subject information and options
+            cert_type: Type of certificate to issue ('client', 'server', 'ca')
+
+        Returns:
+            Certificate: The newly issued certificate with its private key
+
+        Raises:
+            ValueError: If the CA is not initialized or request parameters are invalid
+            RuntimeError: If certificate generation fails
+        """
         logger.debug(
             "Issuing certificate of type '%s' for common name '%s'",
             cert_type,
@@ -676,7 +778,19 @@ class CertificateAuthority:
     async def revoke_certificate(
         self, serial_number: int, reason: Optional[x509.ReasonFlags] = None
     ) -> None:
-        """Revoke a certificate and update CRL"""
+        """
+        Revoke a certificate.
+
+        This method marks a certificate as revoked in the certificate store and
+        optionally specifies a reason for the revocation.
+
+        Args:
+            serial_number: Serial number of the certificate to revoke
+            reason: Optional reason for revocation
+
+        Raises:
+            ValueError: If the certificate is not found
+        """
         logger.debug(
             "Revoking certificate with serial number %d",
             serial_number)
@@ -684,7 +798,19 @@ class CertificateAuthority:
         logger.debug("Certificate revocation completed")
 
     async def generate_crl(self) -> x509.CertificateRevocationList:
-        """Generate a Certificate Revocation List"""
+        """
+        Generate a Certificate Revocation List (CRL).
+
+        This method creates a new CRL containing all currently revoked certificates.
+        The CRL is signed by the CA and includes the revocation date and reason
+        for each revoked certificate.
+
+        Returns:
+            x509.CertificateRevocationList: The generated CRL
+
+        Raises:
+            RuntimeError: If CRL generation fails
+        """
         logger.debug("Generating CRL")
         builder = x509.CertificateRevocationListBuilder()
         builder = builder.issuer_name(self.ca_cert.subject)
@@ -714,7 +840,23 @@ class CertificateAuthority:
         return builder.sign(private_key=self.ca_key, algorithm=hashes.SHA256())
 
     async def renew_certificate(self, serial_number: int) -> Certificate:
-        """Renew a certificate with the same parameters"""
+        """
+        Renew an existing certificate.
+
+        This method creates a new certificate with the same subject information and
+        extensions as an existing certificate, but with updated validity dates.
+        The new certificate will have a new key pair and serial number.
+
+        Args:
+            serial_number: Serial number of the certificate to renew
+
+        Returns:
+            Certificate: The newly issued renewal certificate
+
+        Raises:
+            ValueError: If the certificate is not found
+            RuntimeError: If renewal fails
+        """
         logger.debug(
             "Renewing certificate with serial number %d",
             serial_number)
@@ -746,7 +888,22 @@ class CertificateAuthority:
         return await self.issue_certificate(request, cert_type=cert_info["type"])
 
     async def export_pkcs12(self, cert: Certificate, password: str) -> bytes:
-        """Export certificate and private key as PKCS12"""
+        """
+        Export a certificate and its private key in PKCS#12 format.
+
+        This method creates a PKCS#12 file containing the certificate, its private key,
+        and the CA certificate, protected with the specified password.
+
+        Args:
+            cert: Certificate to export
+            password: Password to protect the PKCS#12 file
+
+        Returns:
+            bytes: The PKCS#12 file contents
+
+        Raises:
+            ValueError: If the certificate has no private key
+        """
         logger.debug("Exporting certificate as PKCS12")
 
         if not password:
@@ -767,7 +924,22 @@ class CertificateAuthority:
         )
 
     async def export_jks(self, cert: Certificate, password: str) -> bytes:
-        """Export certificate and private key as JKS"""
+        """
+        Export a certificate and its private key in Java KeyStore (JKS) format.
+
+        This method creates a JKS file containing the certificate, its private key,
+        and the CA certificate, protected with the specified password.
+
+        Args:
+            cert: Certificate to export
+            password: Password to protect the JKS file
+
+        Returns:
+            bytes: The JKS file contents
+
+        Raises:
+            ValueError: If the certificate has no private key
+        """
         logger.debug("Exporting certificate as JKS")
 
         ca_cert = await self.store.load_ca_cert()

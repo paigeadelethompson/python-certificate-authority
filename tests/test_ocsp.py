@@ -6,6 +6,7 @@ import os
 import tempfile
 
 import pytest
+import pytest_asyncio
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.x509 import ocsp
@@ -17,7 +18,7 @@ from CA.models.certificate import CertificateRequest
 logger = logging.getLogger(__name__)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def ocsp_setup():
     """Setup CA and certificates for OCSP testing"""
     # Initialize CA

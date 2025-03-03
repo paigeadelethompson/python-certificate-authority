@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "python-semantic-release>=8.7.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A Python-based Certificate Authority for managing X.509 certificates"
 readme = "README.md"
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "Paige Thompson", email = "paige@paige.bio" }
 ]
 license = "MIT"
 classifiers = [
@@ -16,10 +16,12 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Security :: Cryptography",
 ]
 keywords = ["certificate", "authority", "x509", "ssl", "tls", "pki"]
@@ -30,7 +32,7 @@ dependencies = [
     "click>=8.1.7",
     "pyjks>=20.0.0"
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 [project.optional-dependencies]
 test = [
@@ -48,57 +50,125 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/python-certificate-authority"
-Documentation = "https://github.com/yourusername/python-certificate-authority#readme"
-Repository = "https://github.com/yourusername/python-certificate-authority.git"
-Issues = "https://github.com/yourusername/python-certificate-authority/issues"
+Homepage = "https://github.com/paigeadelethompson/python-certificate-authority"
+Documentation = "https://github.com/paigeadelethompson/python-certificate-authority#readme"
+Repository = "https://github.com/paigeadelethompson/python-certificate-authority.git"
+Issues = "https://github.com/paigeadelethompson/python-certificate-authority/issues"
 
-[project.scripts]
-ca = "CA.cli:main"
-
-[tool.pytest.ini_options]
-minversion = "8.0"
-addopts = "-ra -q --cov=CA"
-testpaths = ["tests"]
-asyncio_mode = "auto"
-
-[tool.black]
-line-length = 100
-target-version = ['py38']
-include = '\.pyi?$'
-
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-line_length = 100
-
-[tool.pylint]
-max-line-length = 100
-disable = [
-    "C0111",  # missing-docstring
-    "R0903",  # too-few-public-methods
-    "C0103",  # invalid-name
-]
-good-names = ["i", "j", "k", "ex", "Run", "_", "fp", "id"]
-ignore = ["CVS", ".git", ".pytest_cache", "build", "dist"]
-
-[tool.flake8]
-max-line-length = 100
-exclude = [".git", "__pycache__", "build", "dist"]
-extend-ignore = ["E203", "W503"]
-per-file-ignores = [
-    "__init__.py:F401",
+[tool.hatch.envs.default]
+dependencies = [
+  "certificate-authority[dev,test]"
 ]
 
-[tool.mypy]
-python_version = "3.8"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-check_untyped_defs = true
+[tool.hatch.envs.lint]
+dependencies = [
+  "certificate-authority[dev]"
+]
+
+[tool.hatch.envs.test]
+dependencies = [
+  "certificate-authority[test]"
+]
+
+[tool.hatch.envs.default.scripts]
+pytest-test = "pytest {args:tests} --log-cli-level=DEBUG"
+pylint-lint = "pylint src/ tests/ examples/"
+python-black = "black src/ tests/ examples/"
+python-isort = "isort src/ tests/ examples/"
+python-mypy = "mypy src/ tests/ examples/"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/CA"]
 
 [tool.hatch.build.targets.sdist]
-packages = ["src/CA"] 
+packages = ["src/CA"]
+
+[tool.semantic_release]
+version_variable = ["src/CA/__init__.py:__version__"]
+version_toml = ["pyproject.toml:project.version"]
+major_on_zero = false
+branch = "main"
+upload_to_pypi = true
+upload_to_release = true
+build_command = "pip install build && python -m build"
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+include = '\.pyi?$'
+extend-exclude = '''
+^/docs/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 100
+known_first_party = ["CA"]
+known_third_party = ["cryptography", "asn1crypto", "click", "pyjks", "aiofiles"]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+default_section = "THIRDPARTY"
+
+[tool.pylint]
+max-line-length = 100
+good-names = ["i", "j", "k", "ex", "Run", "_", "fp", "id", "ca"]
+ignore = ["CVS", ".git", ".pytest_cache", "build", "dist"]
+extension-pkg-whitelist = ["cryptography"]
+ignore-patterns = ["^\\.#"]
+disable = [
+    "R0913",  # too-many-arguments
+    "R0914",  # too-many-locals
+    "R0902",  # too-many-instance-attributes
+    "R0904",  # too-many-public-methods
+    "R0903",  # too-few-public-methods
+    "R0917",  # too-many-positional-arguments
+    "R0912",  # too-many-branches
+    "R0915",  # too-many-statements
+    "C0302",  # too-many-lines
+    "C0103",  # invalid-name
+    "W0611",  # unused-import
+    "W0612",  # unused-variable
+    "W0613",  # unused-argument
+    "W0621",  # redefined-outer-name
+    "W0622",  # redefined-builtin
+    "W0702",  # bare-except
+    "W0703",  # broad-except
+    "C0413",  # wrong-import-position
+    "C0303",  # trailing-whitespace
+    "C0304",  # missing-final-newline
+    "C0116",  # missing-function-docstring
+    "C0115",  # missing-class-docstring
+    "C0301",  # line-too-long
+    "C0411",  # wrong-import-order
+    "W0107",  # unnecessary-pass
+    "W0212",  # protected-access
+    "W0231",  # super-init-not-called
+    "W1514",  # unspecified-encoding
+    "W0221",  # arguments-differ
+    "E0102",  # function-redefined
+    "E0602",  # undefined-variable
+    "R0801",  # duplicate-code
+    "C0415",  # import-outside-toplevel
+]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+strict_optional = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+show_error_codes = true
+pretty = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=CA --cov-report=term-missing"
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function" 

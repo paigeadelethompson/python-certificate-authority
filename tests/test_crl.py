@@ -3,6 +3,7 @@
 import tempfile
 
 import pytest
+import pytest_asyncio
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
 
@@ -10,7 +11,7 @@ from CA import CertificateAuthority
 from CA.models.certificate import CertificateRequest
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def ca_setup():
     """Setup a CA for testing"""
     with tempfile.TemporaryDirectory(dir="/tmp") as base_dir:

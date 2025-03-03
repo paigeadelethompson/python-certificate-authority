@@ -43,7 +43,7 @@ from .constants import ExtendedKeyUsage
 from .models.certificate import Certificate, CertificateRequest
 from .models.store import CertificateStore
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"
 __all__ = [
     "CertificateAuthority",
     "Certificate",

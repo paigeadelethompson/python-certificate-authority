@@ -9,6 +9,7 @@ from pathlib import Path
 
 import jks
 import pytest
+import pytest_asyncio
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519, padding, rsa
@@ -32,7 +33,7 @@ def temp_dir():
         yield tmpdir
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def ca(temp_dir):
     """Create a temporary CA for testing"""
     ca = CertificateAuthority(temp_dir)

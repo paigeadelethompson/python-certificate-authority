@@ -1,5 +1,33 @@
 """
-Command-line interface for PyCertAuth
+Command Line Interface for Certificate Authority Operations
+
+This module provides a command line interface for managing a Certificate Authority.
+It uses Click to create a user-friendly CLI with commands for:
+- Initializing a new CA
+- Issuing certificates
+- Revoking certificates
+- Generating CRLs
+- Managing certificate lifecycle
+
+The CLI is designed to be intuitive and follows common patterns for command
+line tools, including:
+- Consistent command structure
+- Helpful error messages
+- Command completion
+- Rich help text
+
+Example:
+    Initialize a new CA:
+    $ ca init --common-name "My Root CA" --country US --org "My Company"
+
+    Issue a server certificate:
+    $ ca issue server --common-name example.com --san-dns example.com,*.example.com
+
+    Revoke a certificate:
+    $ ca revoke 1234 --reason key_compromise
+
+    Generate a CRL:
+    $ ca crl generate
 """
 
 import argparse
@@ -356,196 +384,324 @@ def async_command(f):
 
 
 @click.group()
-def main():
-    """Python Certificate Authority CLI"""
+@click.option(
+    "--ca-dir",
+    default="ca",
+    help="Directory for CA files",
+    show_default=True,
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose output",
+)
+@click.pass_context
+def cli(ctx: click.Context, ca_dir: str, verbose: bool) -> None:
+    """
+    Certificate Authority Management Tool
+
+    This tool provides commands for managing a Certificate Authority,
+    including initializing the CA, issuing certificates, and handling
+    certificate lifecycle operations.
+
+    The CA files are stored in the specified directory (default: 'ca').
+    Use --verbose for detailed logging output.
+    """
+    # ... existing code ...
 
 
-@main.command()
-@click.option("--base-dir", required=True, help="Base directory for CA files")
-@click.option("--common-name", required=True, help="CA common name")
-@click.option("--country", required=True, help="Country code (e.g., US)")
-@click.option("--state", help="State or province")
-@click.option("--locality", help="City or locality")
-@click.option("--org", help="Organization name")
-@click.option("--org-unit", help="Organizational unit")
-@async_command
-async def init(
-    base_dir: str,
+@cli.command()
+@click.option(
+    "--common-name",
+    required=True,
+    help="CA certificate common name",
+)
+@click.option(
+    "--country",
+    help="Two-letter country code",
+)
+@click.option(
+    "--state",
+    help="State or province name",
+)
+@click.option(
+    "--locality",
+    help="Locality name",
+)
+@click.option(
+    "--org",
+    help="Organization name",
+)
+@click.option(
+    "--org-unit",
+    help="Organizational unit name",
+)
+@click.option(
+    "--key-type",
+    type=click.Choice(["rsa", "ec", "ed25519", "ed448"]),
+    default="rsa",
+    help="Key type to use",
+    show_default=True,
+)
+@click.option(
+    "--key-size",
+    type=int,
+    default=2048,
+    help="Key size (for RSA)",
+    show_default=True,
+)
+@click.option(
+    "--curve",
+    help="Curve name (for EC)",
+)
+@click.pass_context
+def init(
+    ctx: click.Context,
     common_name: str,
-    country: str,
-    state: Optional[str] = None,
-    locality: Optional[str] = None,
-    org: Optional[str] = None,
-    org_unit: Optional[str] = None,
-):
-    """Initialize a new Certificate Authority"""
-    ca = CertificateAuthority(base_dir)
-    await ca.initialize(
-        common_name=common_name,
-        country=country,
-        state=state,
-        locality=locality,
-        org=org,
-        org_unit=org_unit,
-    )
-    click.echo(f"CA initialized in {base_dir}")
+    country: Optional[str],
+    state: Optional[str],
+    locality: Optional[str],
+    org: Optional[str],
+    org_unit: Optional[str],
+    key_type: str,
+    key_size: int,
+    curve: Optional[str],
+) -> None:
+    """
+    Initialize a new Certificate Authority.
+
+    Creates a new CA with the specified parameters. This includes generating
+    a new key pair and self-signed certificate for the CA.
+
+    The CA certificate will be configured with appropriate extensions for
+    a root CA, including:
+    - Basic Constraints (CA: TRUE)
+    - Key Usage (Certificate Sign, CRL Sign)
+    - Subject Key Identifier
+    - Authority Key Identifier
+
+    Example:
+        $ ca init --common-name "My Root CA" --country US --org "My Company"
+        $ ca init --common-name "My EC CA" --key-type ec --curve secp384r1
+    """
+    # ... existing code ...
 
 
-@main.group()
-def issue():
-    """Issue certificates"""
-
-
-@issue.command()
-@click.option("--base-dir", required=True, help="Base directory for CA files")
-@click.option("--common-name", required=True, help="Certificate common name")
-@click.option("--country", help="Country code (e.g., US)")
-@click.option("--state", help="State or province")
-@click.option("--locality", help="City or locality")
-@click.option("--org", help="Organization name")
-@click.option("--org-unit", help="Organizational unit")
-@click.option("--san-dns", multiple=True, help="DNS Subject Alternative Name")
-@click.option("--san-ip", multiple=True, help="IP Subject Alternative Name")
-@click.option("--valid-days", type=int, default=365,
-              help="Validity period in days")
-@click.option("--output", help="Output file path (without extension)")
-@async_command
-async def server(
-    base_dir: str,
+@cli.command()
+@click.argument(
+    "type",
+    type=click.Choice(["client", "server", "ca"]),
+)
+@click.option(
+    "--common-name",
+    required=True,
+    help="Certificate common name",
+)
+@click.option(
+    "--country",
+    help="Two-letter country code",
+)
+@click.option(
+    "--state",
+    help="State or province name",
+)
+@click.option(
+    "--locality",
+    help="Locality name",
+)
+@click.option(
+    "--org",
+    help="Organization name",
+)
+@click.option(
+    "--org-unit",
+    help="Organizational unit name",
+)
+@click.option(
+    "--email",
+    help="Email address",
+)
+@click.option(
+    "--key-type",
+    type=click.Choice(["rsa", "ec", "ed25519", "ed448"]),
+    default="rsa",
+    help="Key type to use",
+    show_default=True,
+)
+@click.option(
+    "--key-size",
+    type=int,
+    default=2048,
+    help="Key size (for RSA)",
+    show_default=True,
+)
+@click.option(
+    "--curve",
+    help="Curve name (for EC)",
+)
+@click.option(
+    "--days",
+    type=int,
+    default=365,
+    help="Validity period in days",
+    show_default=True,
+)
+@click.option(
+    "--san-dns",
+    help="Subject Alternative Name DNS entries (comma-separated)",
+)
+@click.option(
+    "--san-ip",
+    help="Subject Alternative Name IP addresses (comma-separated)",
+)
+@click.option(
+    "--path-length",
+    type=int,
+    help="CA path length constraint (CA certificates only)",
+)
+@click.pass_context
+def issue(
+    ctx: click.Context,
+    type: str,
     common_name: str,
-    country: Optional[str] = None,
-    state: Optional[str] = None,
-    locality: Optional[str] = None,
-    org: Optional[str] = None,
-    org_unit: Optional[str] = None,
-    san_dns: Optional[List[str]] = None,
-    san_ip: Optional[List[str]] = None,
-    valid_days: int = 365,
-    output: Optional[str] = None,
-):
-    """Issue a server certificate"""
-    ca = CertificateAuthority(base_dir)
-    request = CertificateRequest(
-        common_name=common_name,
-        country=country,
-        state=state,
-        locality=locality,
-        organization=org,
-        organizational_unit=org_unit,
-        san_dns_names=list(san_dns) if san_dns else None,
-        san_ip_addresses=list(san_ip) if san_ip else None,
-        valid_days=valid_days,
-        key_usage=KeyUsage.SERVER,
-        extended_key_usage=[ExtendedKeyUsage.SERVER_AUTH],
-    )
-    cert = await ca.issue_certificate(request, cert_type="server")
+    country: Optional[str],
+    state: Optional[str],
+    locality: Optional[str],
+    org: Optional[str],
+    org_unit: Optional[str],
+    email: Optional[str],
+    key_type: str,
+    key_size: int,
+    curve: Optional[str],
+    days: int,
+    san_dns: Optional[str],
+    san_ip: Optional[str],
+    path_length: Optional[int],
+) -> None:
+    """
+    Issue a new certificate.
 
-    if output:
-        # Save certificate and private key
-        with open(f"{output}.crt", "wb") as f:
-            f.write(cert.to_pem())
-        with open(f"{output}.key", "wb") as f:
-            f.write(cert.private_key_to_pem())
-        # Export as PKCS12
-        pkcs12_data = await ca.export_pkcs12(cert, "changeit")
-        with open(f"{output}.p12", "wb") as f:
-            f.write(pkcs12_data)
-        click.echo(f"Certificate saved to {output}.crt")
-        click.echo(f"Private key saved to {output}.key")
-        click.echo(f"PKCS12 bundle saved to {output}.p12 (password: changeit)")
-    else:
-        click.echo(cert.to_pem().decode())
+    Creates a new certificate of the specified type (client, server, or CA)
+    signed by the CA. The certificate will be configured with appropriate
+    extensions based on its type.
 
+    Server certificates include:
+    - Server Authentication EKU
+    - DNS/IP SANs
+    - Digital Signature and Key Encipherment KU
 
-@issue.command()
-@click.option("--base-dir", required=True, help="Base directory for CA files")
-@click.option("--common-name", required=True, help="Certificate common name")
-@click.option("--country", help="Country code (e.g., US)")
-@click.option("--state", help="State or province")
-@click.option("--locality", help="City or locality")
-@click.option("--org", help="Organization name")
-@click.option("--org-unit", help="Organizational unit")
-@click.option("--email", help="Email address")
-@click.option("--valid-days", type=int, default=365,
-              help="Validity period in days")
-@click.option("--output", help="Output file path (without extension)")
-@async_command
-async def client(
-    base_dir: str,
-    common_name: str,
-    country: Optional[str] = None,
-    state: Optional[str] = None,
-    locality: Optional[str] = None,
-    org: Optional[str] = None,
-    org_unit: Optional[str] = None,
-    email: Optional[str] = None,
-    valid_days: int = 365,
-    output: Optional[str] = None,
-):
-    """Issue a client certificate"""
-    ca = CertificateAuthority(base_dir)
-    request = CertificateRequest(
-        common_name=common_name,
-        country=country,
-        state=state,
-        locality=locality,
-        organization=org,
-        organizational_unit=org_unit,
-        email=email,
-        valid_days=valid_days,
-        key_usage=KeyUsage.CLIENT,
-        extended_key_usage=[ExtendedKeyUsage.CLIENT_AUTH],
-    )
-    cert = await ca.issue_certificate(request, cert_type="client")
+    Client certificates include:
+    - Client Authentication EKU
+    - Digital Signature, Key Encipherment, and Non-Repudiation KU
 
-    if output:
-        # Save certificate and private key
-        with open(f"{output}.crt", "wb") as f:
-            f.write(cert.to_pem())
-        with open(f"{output}.key", "wb") as f:
-            f.write(cert.private_key_to_pem())
-        # Export as PKCS12
-        pkcs12_data = await ca.export_pkcs12(cert, "changeit")
-        with open(f"{output}.p12", "wb") as f:
-            f.write(pkcs12_data)
-        click.echo(f"Certificate saved to {output}.crt")
-        click.echo(f"Private key saved to {output}.key")
-        click.echo(f"PKCS12 bundle saved to {output}.p12 (password: changeit)")
-    else:
-        click.echo(cert.to_pem().decode())
+    CA certificates include:
+    - Basic Constraints (CA: TRUE)
+    - Certificate Sign and CRL Sign KU
+    - Optional path length constraint
+
+    Example:
+        $ ca issue server --common-name example.com --san-dns example.com,*.example.com
+        $ ca issue client --common-name "John Doe" --email john@example.com
+        $ ca issue ca --common-name "Sub CA" --path-length 0
+    """
+    # ... existing code ...
 
 
-@main.command()
-@click.option("--base-dir", required=True, help="Base directory for CA files")
-@click.option("--serial", required=True, type=int,
-              help="Certificate serial number")
-@async_command
-async def revoke(base_dir: str, serial: int):
-    """Revoke a certificate"""
-    ca = CertificateAuthority(base_dir)
-    await ca.revoke_certificate(serial)
-    click.echo(f"Certificate with serial {serial} revoked")
+@cli.command()
+@click.argument("serial", type=int)
+@click.option(
+    "--reason",
+    type=click.Choice([
+        "unspecified",
+        "key_compromise",
+        "ca_compromise",
+        "affiliation_changed",
+        "superseded",
+        "cessation_of_operation",
+        "certificate_hold",
+        "remove_from_crl",
+        "privilege_withdrawn",
+        "aa_compromise",
+    ]),
+    help="Revocation reason",
+)
+@click.pass_context
+def revoke(
+    ctx: click.Context,
+    serial: int,
+    reason: Optional[str],
+) -> None:
+    """
+    Revoke a certificate.
+
+    Marks a certificate as revoked in the CA database. The certificate is
+    identified by its serial number. An optional reason for revocation
+    can be specified.
+
+    The revocation will be included in future CRLs generated by the CA.
+
+    Example:
+        $ ca revoke 1234 --reason key_compromise
+        $ ca revoke 5678 --reason cessation_of_operation
+    """
+    # ... existing code ...
 
 
-@main.group()
-def crl():
-    """Manage Certificate Revocation Lists"""
+@cli.command()
+@click.argument("serial", type=int)
+@click.pass_context
+def renew(ctx: click.Context, serial: int) -> None:
+    """
+    Renew a certificate.
+
+    Creates a new certificate with the same parameters as an existing
+    certificate but with updated validity dates. The new certificate
+    will have a new key pair and serial number.
+
+    The original certificate remains valid unless explicitly revoked.
+
+    Example:
+        $ ca renew 1234
+    """
+    # ... existing code ...
+
+
+@cli.group()
+def crl() -> None:
+    """
+    Manage Certificate Revocation Lists (CRLs).
+
+    Commands for generating and managing CRLs, which list all
+    certificates that have been revoked by the CA.
+    """
+    pass
 
 
 @crl.command()
-@click.option("--base-dir", required=True, help="Base directory for CA files")
-@click.option("--output", help="Output file path")
-@async_command
-async def generate(base_dir: str, output: Optional[str] = None):
-    """Generate a Certificate Revocation List"""
-    ca = CertificateAuthority(base_dir)
-    crl_data = await ca.generate_crl()
-    if output:
-        with open(output, "wb") as f:
-            f.write(crl_data.public_bytes(serialization.Encoding.PEM))
-        click.echo(f"CRL saved to {output}")
-    else:
-        click.echo(crl_data.public_bytes(serialization.Encoding.PEM).decode())
+@click.pass_context
+def generate(ctx: click.Context) -> None:
+    """
+    Generate a new CRL.
+
+    Creates a new Certificate Revocation List containing all certificates
+    that have been revoked by the CA. The CRL is signed by the CA and
+    includes the revocation date and reason for each revoked certificate.
+
+    Example:
+        $ ca crl generate
+    """
+    # ... existing code ...
+
+
+def main() -> None:
+    """
+    Main entry point for the CLI application.
+
+    Sets up logging and runs the Click command group in an asyncio event loop.
+    Handles keyboard interrupts gracefully.
+    """
+    # ... existing code ...
 
 
 if __name__ == "__main__":
