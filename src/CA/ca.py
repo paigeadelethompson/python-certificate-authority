@@ -810,9 +810,9 @@ class CertificateAuthority:
         logger.debug("Generating CRL")
         builder = x509.CertificateRevocationListBuilder()
         builder = builder.issuer_name(self.ca_cert.subject)
-        builder = builder.last_update(datetime.datetime.now(datetime.UTC))
+        builder = builder.last_update(datetime.datetime.now(datetime.timezone.utc))
         builder = builder.next_update(
-            datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)
         )
 
         # Add revoked certificates
@@ -825,7 +825,7 @@ class CertificateAuthority:
             revoked_cert = x509.RevokedCertificateBuilder()
             revoked_cert = revoked_cert.serial_number(cert_info["serial"])
             revoked_cert = revoked_cert.revocation_date(
-                datetime.datetime.now(datetime.UTC))
+                datetime.datetime.now(datetime.timezone.utc))
             if "reason" in cert_info:
                 revoked_cert = revoked_cert.add_extension(
                     x509.CRLReason(cert_info["reason"]), critical=False
