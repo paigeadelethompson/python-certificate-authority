@@ -8,6 +8,8 @@ It uses Click to create a user-friendly CLI with commands for:
 - Revoking certificates
 - Generating CRLs
 - Managing certificate lifecycle
+- Listing certificates
+- Exporting certificates
 
 The CLI is designed to be intuitive and follows common patterns for command
 line tools, including:
@@ -28,362 +30,37 @@ Example:
 
     Generate a CRL:
     $ ca crl generate
+
+    List certificates:
+    $ ca list --type server
+
+    Export certificate:
+    $ ca export 1234 --format pkcs12 --password secret
 """
 
-import argparse
 import asyncio
+import json
 import logging
 import os
-import sys
 from typing import List, Optional
 
 import click
+from cryptography import x509
 
 from .ca import CertificateAuthority
-from .constants import ExtendedKeyUsage, KeyUsage
+from .constants import SAFE_CURVES
 from .models.certificate import CertificateRequest
 
 
-def configure_logging(log_level: str) -> None:
-    """Configure logging with appropriate levels based on debug flag"""
-    # Set up basic logging format
-    logging.basicConfig(
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S")
-
-    # Get the root logger
-    root_logger = logging.getLogger()
-
-    # Set the level for all loggers based on debug flag
-    if log_level == "DEBUG":
-        # In debug mode, allow all levels for all loggers
-        root_logger.setLevel(logging.DEBUG)
-    else:
-        # In non-debug mode, only allow INFO and above for pycertauth loggers
-        # and WARNING and above for all other loggers
-        root_logger.setLevel(logging.WARNING)
-
-        # Set INFO level specifically for pycertauth loggers
-        pycertauth_logger = logging.getLogger("pycertauth")
-        pycertauth_logger.setLevel(logging.INFO)
-
-
-def create_parser() -> argparse.ArgumentParser:
-    """Create the command-line argument parser"""
-    parser = argparse.ArgumentParser(
-        description="Python Certificate Authority CLI",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    parser.add_argument(
-        "--dir",
-        default="./ca",
-        help="Base directory for CA files (default: ./ca)")
-    parser.add_argument(
-        "--log-level",
-        choices=[
-            "DEBUG",
-            "INFO"],
-        default="INFO",
-        help="Set the logging level (default: INFO for pycertauth, WARNING for others; DEBUG enables all logging)",
-    )
-
-    subparsers = parser.add_subparsers(
-        dest="command", help="Command to execute")
-
-    # Initialize CA
-    init_parser = subparsers.add_parser("init", help="Initialize a new CA")
-    init_parser.add_argument(
-        "--common-name",
-        required=True,
-        help="CA common name")
-    init_parser.add_argument("--country", default="US", help="Country name")
-    init_parser.add_argument(
-        "--state",
-        default="",
-        help="State or province name")
-    init_parser.add_argument("--locality", default="", help="Locality name")
-    init_parser.add_argument("--org", default="", help="Organization name")
-    init_parser.add_argument(
-        "--org-unit",
-        default="",
-        help="Organizational unit name")
-
-    # Issue certificate
-    issue_parser = subparsers.add_parser(
-        "issue", help="Issue a new certificate")
-    issue_parser.add_argument(
-        "--type",
-        choices=[
-            "server",
-            "client",
-            "sub-ca"],
-        default="server",
-        help="Certificate type")
-    issue_parser.add_argument(
-        "--common-name",
-        required=True,
-        help="Certificate common name")
-    issue_parser.add_argument("--country", default="US", help="Country name")
-    issue_parser.add_argument(
-        "--state",
-        default="",
-        help="State or province name")
-    issue_parser.add_argument("--locality", default="", help="Locality name")
-    issue_parser.add_argument("--org", default="", help="Organization name")
-    issue_parser.add_argument(
-        "--org-unit",
-        default="",
-        help="Organizational unit name")
-    issue_parser.add_argument("--email", default="", help="Email address")
-    issue_parser.add_argument("--dns", nargs="*", help="DNS names for SAN")
-    issue_parser.add_argument("--ip", nargs="*", help="IP addresses for SAN")
-    issue_parser.add_argument(
-        "--valid-days",
-        type=int,
-        default=365,
-        help="Validity period in days")
-    issue_parser.add_argument(
-        "--path-length",
-        type=int,
-        help="Path length for sub-CA certificates")
-
-    # Revoke certificate
-    revoke_parser = subparsers.add_parser(
-        "revoke", help="Revoke a certificate")
-    revoke_parser.add_argument(
-        "serial",
-        type=int,
-        help="Certificate serial number")
-
-    # List certificates
-    list_parser = subparsers.add_parser("list", help="List certificates")
-    list_parser.add_argument(
-        "--type",
-        choices=[
-            "server",
-            "client",
-            "sub-ca"],
-        help="Filter by certificate type")
-    list_parser.add_argument(
-        "--revoked",
-        action="store_true",
-        help="List revoked certificates")
-
-    # Export certificate
-    export_parser = subparsers.add_parser("export", help="Export certificate")
-    export_parser.add_argument(
-        "serial",
-        type=int,
-        help="Certificate serial number")
-    export_parser.add_argument(
-        "--format",
-        choices=[
-            "pem",
-            "pkcs12",
-            "jks"],
-        default="pem",
-        help="Export format")
-    export_parser.add_argument("--password",
-                               help="Password for PKCS12/JKS export")
-    export_parser.add_argument(
-        "--out", help="Output file (default: <serial>.<format>)")
-
-    return parser
-
-
-async def init_ca(args: argparse.Namespace) -> None:
-    """Initialize a new CA"""
-    logger = logging.getLogger(__name__)
-    logger.info("Initializing new Certificate Authority")
-    logger.debug("CA directory: %s", args.dir)
-
-    ca = CertificateAuthority(args.dir)
-    await ca.initialize(
-        common_name=args.common_name,
-        country=args.country,
-        state=args.state,
-        locality=args.locality,
-        org=args.org,
-        org_unit=args.org_unit,
-    )
-    logger.info("CA initialized successfully in %s", args.dir)
-
-
-async def issue_cert(args: argparse.Namespace) -> None:
-    """Issue a new certificate"""
-    logger = logging.getLogger(__name__)
-    logger.info("Issuing new %s certificate", args.type)
-    logger.debug("Certificate details - Common Name: %s", args.common_name)
-
-    ca = CertificateAuthority(args.dir)
-
-    request = CertificateRequest(
-        common_name=args.common_name,
-        country=args.country,
-        state=args.state,
-        locality=args.locality,
-        organization=args.org,
-        organizational_unit=args.org_unit,
-        email=args.email,
-        valid_days=args.valid_days,
-        san_dns_names=args.dns or [],
-        san_ip_addresses=args.ip or [],
-        is_ca=args.type == "sub-ca",
-        path_length=args.path_length if args.type == "sub-ca" else None,
-    )
-
-    cert = await ca.issue_certificate(request, cert_type=args.type)
-    logger.info(
-        "Certificate issued successfully with serial number %d",
-        cert.serial_number)
-
-
-async def revoke_cert(args: argparse.Namespace) -> None:
-    """Revoke a certificate"""
-    logger = logging.getLogger(__name__)
-    logger.info("Revoking certificate with serial number %d", args.serial)
-
-    ca = CertificateAuthority(args.dir)
-    await ca.revoke_certificate(args.serial)
-    logger.info("Certificate %d revoked successfully", args.serial)
-
-
-async def list_certs(args: argparse.Namespace) -> None:
-    """List certificates"""
-    logger = logging.getLogger(__name__)
-    ca = CertificateAuthority(args.dir)
-
-    if args.revoked:
-        logger.info("Listing revoked certificates")
-        certs = await ca.store.list_revoked()
-    else:
-        cert_type = args.type or "all"
-        logger.info("Listing %s certificates", cert_type)
-        certs = await ca.store.list_certificates(cert_type=args.type)
-
-    for cert in certs:
-        logger.info("Certificate:")
-        logger.info("  Serial: %s", cert["serial"])
-        logger.info("  Type: %s", cert["type"])
-        logger.info("  Subject: %s", cert["subject"]["common_name"])
-        logger.info("  Not valid after: %s", cert["not_valid_after"])
-
-
-async def export_cert(args: argparse.Namespace) -> None:
-    """Export a certificate"""
-    logger = logging.getLogger(__name__)
-    logger.info(
-        "Exporting certificate %d in %s format",
-        args.serial,
-        args.format)
-
-    ca = CertificateAuthority(args.dir)
-    cert_info = await ca.store.get_certificate(args.serial)
-
-    if not cert_info:
-        logger.error("Certificate %d not found", args.serial)
-        return
-
-    cert_dir = {"sub-ca": "sub-ca", "server": "server-certs",
-                "client": "client-certs"}[cert_info["type"]]
-
-    cert_path = os.path.join(args.dir, cert_dir, f"{args.serial}.crt")
-    key_path = os.path.join(args.dir, cert_dir, f"{args.serial}.key")
-
-    if not os.path.exists(cert_path):
-        logger.error("Certificate file not found: %s", cert_path)
-        return
-
-    out_file = args.out or f"{args.serial}.{args.format}"
-    logger.debug("Output file: %s", out_file)
-
-    if args.format == "pem":
-        # Copy certificate and key to output
-        with open(cert_path, "rb") as f:
-            cert_data = f.read()
-        if os.path.exists(key_path):
-            logger.debug("Including private key in export")
-            with open(key_path, "rb") as f:
-                key_data = f.read()
-            data = key_data + cert_data
-        else:
-            data = cert_data
-    else:
-        # Load certificate and key
-        with open(cert_path, "rb") as f:
-            cert_data = f.read()
-        with open(key_path, "rb") as f:
-            key_data = f.read()
-
-        from cryptography import x509
-        from cryptography.hazmat.primitives import serialization
-
-        cert = x509.load_pem_x509_certificate(cert_data)
-        key = serialization.load_pem_private_key(key_data, password=None)
-
-        if args.format == "pkcs12":
-            if not args.password:
-                logger.error("Password required for PKCS12 export")
-                return
-            logger.debug("Exporting as PKCS12")
-            data = await ca.export_pkcs12(cert, args.password)
-        else:  # jks
-            if not args.password:
-                logger.error("Password required for JKS export")
-                return
-            logger.debug("Exporting as JKS")
-            data = await ca.export_jks(cert, args.password)
-
-    with open(out_file, "wb") as f:
-        f.write(data)
-    logger.info("Certificate exported successfully to %s", out_file)
-
-
-async def main() -> None:
-    """Main entry point"""
-    parser = create_parser()
-    args = parser.parse_args()
-
-    # Configure logging with appropriate levels
-    configure_logging(args.log_level)
-
-    logger = logging.getLogger(__name__)
-
-    if not args.command:
-        parser.print_help()
-        return
-
-    # Create base directory if it doesn't exist
-    os.makedirs(args.dir, exist_ok=True)
-    logger.debug("Ensuring base directory exists: %s", args.dir)
-
-    commands = {
-        "init": init_ca,
-        "issue": issue_cert,
-        "revoke": revoke_cert,
-        "list": list_certs,
-        "export": export_cert,
-    }
-
-    try:
-        logger.debug("Executing command: %s", args.command)
-        await commands[args.command](args)
-    except Exception as e:
-        logger.error("Command failed: %s", str(e), exc_info=True)
-        sys.exit(1)
-
-
 def async_command(f):
-    """Decorator to run async commands"""
-
+    """Decorator to run Click commands as async functions"""
     def wrapper(*args, **kwargs):
         return asyncio.run(f(*args, **kwargs))
-
+    wrapper.__name__ = f.__name__
     return wrapper
 
 
-@click.group()
+@click.group(name="ca")
 @click.option(
     "--ca-dir",
     default="ca",
@@ -398,17 +75,21 @@ def async_command(f):
 )
 @click.pass_context
 def cli(ctx: click.Context, ca_dir: str, verbose: bool) -> None:
-    """
-    Certificate Authority Management Tool
+    """Certificate Authority CLI
 
     This tool provides commands for managing a Certificate Authority,
-    including initializing the CA, issuing certificates, and handling
-    certificate lifecycle operations.
-
-    The CA files are stored in the specified directory (default: 'ca').
-    Use --verbose for detailed logging output.
+    including certificate issuance, revocation, and CRL generation.
     """
-    # ... existing code ...
+    # Configure logging
+    log_level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+    # Store CA directory in context
+    ctx.ensure_object(dict)
+    ctx.obj["ca_dir"] = ca_dir
 
 
 @cli.command()
@@ -456,7 +137,8 @@ def cli(ctx: click.Context, ca_dir: str, verbose: bool) -> None:
     help="Curve name (for EC)",
 )
 @click.pass_context
-def init(
+@async_command
+async def init(
     ctx: click.Context,
     common_name: str,
     country: Optional[str],
@@ -468,24 +150,20 @@ def init(
     key_size: int,
     curve: Optional[str],
 ) -> None:
-    """
-    Initialize a new Certificate Authority.
-
-    Creates a new CA with the specified parameters. This includes generating
-    a new key pair and self-signed certificate for the CA.
-
-    The CA certificate will be configured with appropriate extensions for
-    a root CA, including:
-    - Basic Constraints (CA: TRUE)
-    - Key Usage (Certificate Sign, CRL Sign)
-    - Subject Key Identifier
-    - Authority Key Identifier
-
-    Example:
-        $ ca init --common-name "My Root CA" --country US --org "My Company"
-        $ ca init --common-name "My EC CA" --key-type ec --curve secp384r1
-    """
-    # ... existing code ...
+    """Initialize a new Certificate Authority"""
+    ca = CertificateAuthority(ctx.obj["ca_dir"])
+    await ca.initialize(
+        common_name=common_name,
+        country=country,
+        state=state,
+        locality=locality,
+        org=org,
+        org_unit=org_unit,
+        key_type=key_type,
+        key_size=key_size,
+        curve=curve,
+    )
+    click.echo(f"CA initialized successfully in {ctx.obj['ca_dir']}")
 
 
 @cli.command()
@@ -561,7 +239,8 @@ def init(
     help="CA path length constraint (CA certificates only)",
 )
 @click.pass_context
-def issue(
+@async_command
+async def issue(
     ctx: click.Context,
     type: str,
     common_name: str,
@@ -579,33 +258,34 @@ def issue(
     san_ip: Optional[str],
     path_length: Optional[int],
 ) -> None:
-    """
-    Issue a new certificate.
+    """Issue a new certificate"""
+    ca = CertificateAuthority(ctx.obj["ca_dir"])
 
-    Creates a new certificate of the specified type (client, server, or CA)
-    signed by the CA. The certificate will be configured with appropriate
-    extensions based on its type.
+    # Split SAN entries
+    dns_names = san_dns.split(",") if san_dns else []
+    ip_addresses = san_ip.split(",") if san_ip else []
 
-    Server certificates include:
-    - Server Authentication EKU
-    - DNS/IP SANs
-    - Digital Signature and Key Encipherment KU
+    request = CertificateRequest(
+        common_name=common_name,
+        country=country,
+        state=state,
+        locality=locality,
+        organization=org,
+        organizational_unit=org_unit,
+        email=email,
+        valid_days=days,
+        san_dns_names=dns_names,
+        san_ip_addresses=ip_addresses,
+        is_ca=type == "ca",
+        path_length=path_length if type == "ca" else None,
+        key_type=key_type,
+        key_size=key_size,
+        curve=curve,
+    )
 
-    Client certificates include:
-    - Client Authentication EKU
-    - Digital Signature, Key Encipherment, and Non-Repudiation KU
-
-    CA certificates include:
-    - Basic Constraints (CA: TRUE)
-    - Certificate Sign and CRL Sign KU
-    - Optional path length constraint
-
-    Example:
-        $ ca issue server --common-name example.com --san-dns example.com,*.example.com
-        $ ca issue client --common-name "John Doe" --email john@example.com
-        $ ca issue ca --common-name "Sub CA" --path-length 0
-    """
-    # ... existing code ...
+    cert = await ca.issue_certificate(request, cert_type=type)
+    click.echo(
+        f"Certificate issued successfully with serial number {cert.serial_number}")
 
 
 @cli.command()
@@ -627,82 +307,180 @@ def issue(
     help="Revocation reason",
 )
 @click.pass_context
-def revoke(
+@async_command
+async def revoke(
     ctx: click.Context,
     serial: int,
     reason: Optional[str],
 ) -> None:
-    """
-    Revoke a certificate.
-
-    Marks a certificate as revoked in the CA database. The certificate is
-    identified by its serial number. An optional reason for revocation
-    can be specified.
-
-    The revocation will be included in future CRLs generated by the CA.
-
-    Example:
-        $ ca revoke 1234 --reason key_compromise
-        $ ca revoke 5678 --reason cessation_of_operation
-    """
-    # ... existing code ...
+    """Revoke a certificate"""
+    ca = CertificateAuthority(ctx.obj["ca_dir"])
+    await ca.revoke_certificate(
+        serial,
+        reason=getattr(
+            x509.ReasonFlags,
+            reason) if reason else None)
+    click.echo(f"Certificate {serial} revoked successfully")
 
 
 @cli.command()
 @click.argument("serial", type=int)
 @click.pass_context
-def renew(ctx: click.Context, serial: int) -> None:
-    """
-    Renew a certificate.
-
-    Creates a new certificate with the same parameters as an existing
-    certificate but with updated validity dates. The new certificate
-    will have a new key pair and serial number.
-
-    The original certificate remains valid unless explicitly revoked.
-
-    Example:
-        $ ca renew 1234
-    """
-    # ... existing code ...
+@async_command
+async def renew(ctx: click.Context, serial: int) -> None:
+    """Renew a certificate"""
+    ca = CertificateAuthority(ctx.obj["ca_dir"])
+    cert = await ca.renew_certificate(serial)
+    click.echo(
+        f"Certificate renewed successfully with new serial number {cert.serial_number}")
 
 
 @cli.group()
 def crl() -> None:
-    """
-    Manage Certificate Revocation Lists (CRLs).
-
-    Commands for generating and managing CRLs, which list all
-    certificates that have been revoked by the CA.
-    """
+    """Manage Certificate Revocation Lists"""
     pass
 
 
 @crl.command()
 @click.pass_context
-def generate(ctx: click.Context) -> None:
+@async_command
+async def generate(ctx: click.Context) -> None:
+    """Generate a new CRL"""
+    ca = CertificateAuthority(ctx.obj["ca_dir"])
+    crl = await ca.generate_crl()
+    with open("crl.pem", "wb") as f:
+        f.write(crl.public_bytes(encoding=x509.Encoding.PEM))
+    click.echo("CRL generated successfully and saved to crl.pem")
+
+
+@cli.command()
+@click.option(
+    "--type",
+    type=click.Choice(["server", "client", "ca"]),
+    help="Filter by certificate type",
+)
+@click.option(
+    "--revoked",
+    is_flag=True,
+    help="List revoked certificates",
+)
+@click.pass_context
+@async_command
+async def list(
+    ctx: click.Context,
+    type: Optional[str],
+    revoked: bool,
+) -> None:
+    """List certificates
+
+    Lists all certificates or filters by type and revocation status.
+    Displays certificate details including serial number, subject,
+    validity period, and status.
     """
-    Generate a new CRL.
+    ca = CertificateAuthority(ctx.obj["ca_dir"])
 
-    Creates a new Certificate Revocation List containing all certificates
-    that have been revoked by the CA. The CRL is signed by the CA and
-    includes the revocation date and reason for each revoked certificate.
+    if revoked:
+        certs = await ca.store.list_revoked()
+    else:
+        certs = await ca.store.list_certificates(cert_type=type)
 
-    Example:
-        $ ca crl generate
+    for cert in certs:
+        click.echo("Certificate:")
+        click.echo(f"  Serial: {cert['serial']}")
+        click.echo(f"  Type: {cert['type']}")
+        click.echo(f"  Subject: {cert['subject']['common_name']}")
+        click.echo(f"  Not valid after: {cert['not_valid_after']}")
+        if revoked and "revocation_date" in cert:
+            click.echo(f"  Revoked: {cert['revocation_date']}")
+            if cert.get("revocation_reason"):
+                click.echo(f"  Reason: {cert['revocation_reason']}")
+        click.echo("")
+
+
+@cli.command()
+@click.argument("serial", type=int)
+@click.option(
+    "--format",
+    type=click.Choice(["pem", "pkcs12", "jks"]),
+    default="pem",
+    help="Export format",
+    show_default=True,
+)
+@click.option(
+    "--password",
+    help="Password for PKCS12/JKS export",
+)
+@click.option(
+    "--out",
+    help="Output file (default: <serial>.<format>)",
+)
+@click.pass_context
+@async_command
+async def export(
+    ctx: click.Context,
+    serial: int,
+    format: str,
+    password: Optional[str],
+    out: Optional[str],
+) -> None:
+    """Export a certificate
+
+    Exports a certificate and its private key in the specified format.
+    For PKCS12 and JKS formats, a password is required to protect the
+    private key. The certificate chain will be included if available.
     """
-    # ... existing code ...
+    ca = CertificateAuthority(ctx.obj["ca_dir"])
+    cert_info = await ca.store.get_certificate(serial)
 
+    if not cert_info:
+        click.echo(f"Certificate {serial} not found", err=True)
+        return
 
-def main() -> None:
-    """
-    Main entry point for the CLI application.
+    # Get the certificate and key paths
+    cert_dir = {
+        "ca": "sub-ca",
+        "server": "server-certs",
+        "client": "client-certs"
+    }[cert_info["type"]]
 
-    Sets up logging and runs the Click command group in an asyncio event loop.
-    Handles keyboard interrupts gracefully.
-    """
-    # ... existing code ...
+    cert_path = f"{ctx.obj['ca_dir']}/{cert_dir}/{serial}.crt"
+    key_path = f"{ctx.obj['ca_dir']}/{cert_dir}/{serial}.key"
 
+    # Load certificate and key
+    with open(cert_path, "rb") as f:
+        cert_data = f.read()
 
-if __name__ == "__main__":
-    main()
+    if format == "pem":
+        # For PEM, include both cert and key if available
+        data = cert_data
+        try:
+            with open(key_path, "rb") as f:
+                key_data = f.read()
+                data = key_data + cert_data
+        except FileNotFoundError:
+            pass  # Key not available, just use cert
+    else:  # pkcs12 or jks
+        if not password:
+            click.echo(f"Password required for {format.upper()} export", err=True)
+            return
+
+        # Load the private key
+        try:
+            with open(key_path, "rb") as f:
+                key_data = f.read()
+        except FileNotFoundError:
+            click.echo("Private key not found", err=True)
+            return
+
+        # Export in requested format
+        if format == "pkcs12":
+            data = await ca.export_pkcs12(cert_info, password)
+        else:  # jks
+            data = await ca.export_jks(cert_info, password)
+
+    # Write to output file
+    out_file = out or f"{serial}.{format}"
+    with open(out_file, "wb") as f:
+        f.write(data)
+
+    click.echo(f"Certificate exported successfully to {out_file}")

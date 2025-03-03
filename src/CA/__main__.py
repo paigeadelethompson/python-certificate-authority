@@ -10,9 +10,11 @@ Example:
     $ python -m CA issue --type server --common-name "example.com"
 """
 
-import asyncio
+from .cli import cli
 
-from .cli import main
+def main():
+    """Main entry point for the CLI application"""
+    cli(prog_name="ca")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

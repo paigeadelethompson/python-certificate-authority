@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "certificate-authority"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Python-based Certificate Authority for managing X.509 certificates"
 readme = "README.md"
 authors = [
