@@ -1,4 +1,4 @@
-# Python Certificate Authority
+# certificate-authority
 
 A comprehensive Python-based Certificate Authority (CA) for managing X.509 certificates. This library provides a complete solution for creating and managing a certificate authority, including support for certificate issuance, revocation, and various certificate formats.
 
@@ -22,13 +22,13 @@ A comprehensive Python-based Certificate Authority (CA) for managing X.509 certi
 ## Installation
 
 ```bash
-pip install python-certificate-authority
+pip install certificate-authority
 ```
 
 For development:
 
 ```bash
-pip install python-certificate-authority[dev]
+pip install certificate-authority[dev]
 ```
 
 ## Quick Start
@@ -93,8 +93,8 @@ ca crl generate
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/paigeadelethompson/python-certificate-authority.git
-cd python-certificate-authority
+git clone https://github.com/paigeadelethompson/certificate-authority.git
+cd certificate-authority
 ```
 
 2. Install hatch:
